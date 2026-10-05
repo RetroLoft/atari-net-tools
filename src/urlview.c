@@ -6,6 +6,7 @@
  *
  *   URLVIEW http://host[:port]/path        (also without http://)
  *   URLVIEW -h http://...                  also show the HTTP headers
+ *   URLVIEW -n http://...                  speed test: fetch, discard, show KB/s
  *
  * Only http://, no https:// (no TLS on a 68000). Compiled with -mshort
  * (STinG passes 16-bit ints), no C library: BIOS for the screen and keys.
@@ -129,7 +130,7 @@ static int same_prefix(const char *s, const char *p)
 /* ---------------- main ---------------- */
 
 static char url[256], host[128], req[512];
-static unsigned char buf[512];
+static unsigned char buf[2048];
 
 static void tos_quit(void) { Pterm0(); }
 
@@ -139,7 +140,8 @@ void tos_main(BASEPAGE *bp)
     char *u, *h, *path;
     uint32 ip;
     uint16 port = 80;
-    int16 cn, r, i, n, show_headers = 0;
+    int16 cn, r, i, n, show_headers = 0, discard = 0;
+    long body = 0, t_first = 0, t_end, idle = 0, busy = 0;
     int state = 0, status_ok = 1;           /* 0: status line, 1: headers, 2: body */
     char status[80];
     int sl = 0;
@@ -156,9 +158,11 @@ void tos_main(BASEPAGE *bp)
     url[i] = 0;
     u = url;
     while (*u == ' ') u++;
-    if (u[0] == '-' && (u[1] == 'h' || u[1] == 'H')) {
-        show_headers = 1;
+    while (u[0] == '-') {                   /* -h headers, -n speed test */
+        if (u[1] == 'h' || u[1] == 'H') show_headers = 1;
+        else if (u[1] == 'n' || u[1] == 'N') discard = 1;
         u += 2;
+        while (*u && *u != ' ') u++;
         while (*u == ' ') u++;
     }
     if (!*u) {
@@ -184,7 +188,7 @@ void tos_main(BASEPAGE *bp)
     path = *u == '/' ? u : "/";
     for (h = path; *h && *h != ' '; h++) ;
     *h = 0;
-    if (!host[0]) { outs("Gebruik: URLVIEW [-h] http://host/pad\r\n"); goto done; }
+    if (!host[0]) { outs("Gebruik: URLVIEW [-h] [-n] http://host/pad\r\n"); goto done; }
 
     sting = (DRV_LIST *)Supexec(get_sting);
     if (!sting) { outs("STinG is niet geladen.\r\n"); goto done; }
@@ -217,7 +221,8 @@ void tos_main(BASEPAGE *bp)
         if (now() - last > 2000) break;
     if (r < 0) { fail("Versturen mislukt", r); TCP_close(cn, 0, &closed); goto done; }
 
-    outs(ESC "E");
+    if (discard) outs("Ophalen zonder te tonen...\r\n");
+    else outs(ESC "E");
     line = col = 0;
     last = now();
     while (!quit) {
@@ -226,10 +231,16 @@ void tos_main(BASEPAGE *bp)
             if (n > (int16)sizeof buf) n = sizeof buf;
             n = CNget_block(cn, buf, n);
             if (n <= 0) continue;
+            busy++;
             last = now();
+            if (!t_first) t_first = last;
             for (i = 0; i < n && !quit; i++) {
                 unsigned char c = buf[i];
-                if (state == 2) { show(c); continue; }
+                if (state == 2) {
+                    if (discard) { body += n - i; break; }
+                    show(c);
+                    continue;
+                }
                 if (state == 0) {           /* status line: "HTTP/1.x 200 OK" */
                     if (c == '\n') {
                         status[sl] = 0;
@@ -254,12 +265,24 @@ void tos_main(BASEPAGE *bp)
                 } else if (c != '\r' && sl < (int)sizeof status - 1) status[sl++] = (char)c;
             }
         } else if (n == 0 || n == E_NODATA) {
+            idle++;
             if (Bconstat(2) && key() == CTRL_C) quit = 1;
             else if (now() - last > 6000) { new_line(); outs("(geen antwoord meer, 30 s)"); break; }
         } else
             break;                          /* E_EOF: the page is complete */
     }
+    t_end = now();
     TCP_close(cn, 0, &closed);
+    if (discard && !quit) {
+        long ms = (t_end - t_first) * 5;
+        outs("\r\n");
+        outnum(body); outs(" bytes in ");
+        outnum(ms / 1000); out('.'); outnum(ms / 100 % 10); outs(" s");
+        if (ms > 0) { outs(" = "); outnum(body * 1000 / 1024 / ms); outs(" KB/s"); }
+        outs("\r\n");
+        outnum(busy); outs(" blocks, "); outnum(idle); outs(" times no data\r\n");
+        goto done;
+    }
     if (!quit) {
         if (col) new_line();
         outs(ESC "p-Einde-" ESC "q");
