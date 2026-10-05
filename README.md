@@ -55,3 +55,11 @@ Control-C while a connection is still open.
 | `src/urlview.c` | URLVIEW |
 | `src/start.S` | start-up code for programs without the C library |
 | `include/transprt.h` | STinG client API, from the STinG developer kit (Peter Rottengatter, Ronald Andersson) |
+
+## License
+
+Copyright (C) 2026 Frank Beentjes.
+
+GNU General Public License, version 3 or (at your option) any later version: see
+[LICENSE](LICENSE). `include/transprt.h` is part of the STinG developer kit by Peter
+Rottengatter and Ronald Andersson.

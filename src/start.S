@@ -1,3 +1,4 @@
+| SPDX-License-Identifier: GPL-3.0-or-later - Copyright (C) 2026 Frank Beentjes
 | Start of a small TOS program without the C library: own stack in the BSS,
 | then _tos_main(basepage). The program gives back the rest of its memory.
 	.text

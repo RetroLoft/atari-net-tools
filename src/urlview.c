@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later - Copyright (C) 2026 Frank Beentjes */
 /*
  * URLVIEW.TTP - show a web page (the source, HTTP) through STinG, a screen
  * at a time, like the desktop's file viewer: "-Meer-" waits for a key,
