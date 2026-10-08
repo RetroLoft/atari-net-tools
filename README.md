@@ -10,13 +10,19 @@ Ethernet adapter or a serial PPP/SLIP link.
 ## URLVIEW.TTP
 
 Shows the source of a web page, a screen at a time, the way the desktop shows a text
-file. Nothing is written to disk.
+file. Nothing is written to disk, unless you ask for it with `-o`.
 
 ```text
 URLVIEW info.cern.ch
 URLVIEW http://192.168.1.10:8000/notes.txt
 URLVIEW -h example.com          also show the HTTP headers
+URLVIEW -o B: 192.168.1.10:8000/GAME.ZIP
+                                save it as B:\GAME.ZIP (or give a full name: -o B:\X.ZIP)
+URLVIEW -n 192.168.1.10:8000/BIG.BIN
+                                speed test: fetch, throw away, show KB/s
 ```
+
+With `-o` and `-n` it ends with the number of bytes, the time and the speed.
 
 - Start it from the desktop as a `.TTP` and type the address, or leave the parameter
   empty and it asks for one.

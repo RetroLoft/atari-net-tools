@@ -2,11 +2,13 @@
 /*
  * URLVIEW.TTP - show a web page (the source, HTTP) through STinG, a screen
  * at a time, like the desktop's file viewer: "-Meer-" waits for a key,
- * Control-C quits at once. Nothing is written to disk.
+ * Control-C quits at once. Only -o writes to disk.
  *
  *   URLVIEW http://host[:port]/path        (also without http://)
  *   URLVIEW -h http://...                  also show the HTTP headers
  *   URLVIEW -n http://...                  speed test: fetch, discard, show KB/s
+ *   URLVIEW -o B:\FILE.BIN http://...      save the body to a file, show KB/s
+ *   URLVIEW -o B: http://host/FILE.BIN     the same, name taken from the URL
  *
  * Only http://, no https:// (no TLS on a 68000). Compiled with -mshort
  * (STinG passes 16-bit ints), no C library: BIOS for the screen and keys.
@@ -129,7 +131,7 @@ static int same_prefix(const char *s, const char *p)
 
 /* ---------------- main ---------------- */
 
-static char url[256], host[128], req[512];
+static char url[256], host[128], req[512], outname[128];
 static unsigned char buf[2048];
 
 static void tos_quit(void) { Pterm0(); }
@@ -140,7 +142,8 @@ void tos_main(BASEPAGE *bp)
     char *u, *h, *path;
     uint32 ip;
     uint16 port = 80;
-    int16 cn, r, i, n, show_headers = 0, discard = 0;
+    int16 cn, r, i, n, show_headers = 0, discard = 0, save = 0;
+    long fh = -1;
     long body = 0, t_first = 0, t_end, idle = 0, busy = 0;
     int state = 0, status_ok = 1;           /* 0: status line, 1: headers, 2: body */
     char status[80];
@@ -158,9 +161,18 @@ void tos_main(BASEPAGE *bp)
     url[i] = 0;
     u = url;
     while (*u == ' ') u++;
-    while (u[0] == '-') {                   /* -h headers, -n speed test */
+    while (u[0] == '-') {                   /* -h headers, -n speed test, -o file */
         if (u[1] == 'h' || u[1] == 'H') show_headers = 1;
         else if (u[1] == 'n' || u[1] == 'N') discard = 1;
+        else if (u[1] == 'o' || u[1] == 'O') {
+            save = discard = 1;
+            u += 2;
+            while (*u == ' ') u++;
+            for (h = outname; *u && *u != ' ' && h < outname + sizeof outname - 1; ) *h++ = *u++;
+            *h = 0;
+            while (*u == ' ') u++;
+            continue;
+        }
         u += 2;
         while (*u && *u != ' ') u++;
         while (*u == ' ') u++;
@@ -188,7 +200,19 @@ void tos_main(BASEPAGE *bp)
     path = *u == '/' ? u : "/";
     for (h = path; *h && *h != ' '; h++) ;
     *h = 0;
-    if (!host[0]) { outs("Gebruik: URLVIEW [-h] [-n] http://host/pad\r\n"); goto done; }
+    if (save && outname[0]) {               /* only a drive or folder: name from the URL */
+        for (h = outname; *h; h++) ;
+        if (h[-1] == ':' || h[-1] == '\\') {
+            char *f = path, *q;
+            for (q = path; *q; q++) if (*q == '/') f = q + 1;
+            while (*f && h < outname + sizeof outname - 1) *h++ = *f++;
+            *h = 0;
+        }
+    }
+    if (!host[0] || (save && !outname[0])) {
+        outs("Gebruik: URLVIEW [-h] [-n] [-o bestand] http://host/pad\r\n");
+        goto done;
+    }
 
     sting = (DRV_LIST *)Supexec(get_sting);
     if (!sting) { outs("STinG is niet geladen.\r\n"); goto done; }
@@ -221,7 +245,8 @@ void tos_main(BASEPAGE *bp)
         if (now() - last > 2000) break;
     if (r < 0) { fail("Versturen mislukt", r); TCP_close(cn, 0, &closed); goto done; }
 
-    if (discard) outs("Ophalen zonder te tonen...\r\n");
+    if (save) { outs("Opslaan in "); outs(outname); outs("...\r\n"); }
+    else if (discard) outs("Ophalen zonder te tonen...\r\n");
     else outs(ESC "E");
     line = col = 0;
     last = now();
@@ -237,6 +262,18 @@ void tos_main(BASEPAGE *bp)
             for (i = 0; i < n && !quit; i++) {
                 unsigned char c = buf[i];
                 if (state == 2) {
+                    if (save && status_ok) {
+                        if (fh < 0 && (fh = Fcreate(outname, 0)) < 0) {
+                            outs("Kan "); outs(outname); outs(" niet aanmaken.\r\n");
+                            quit = 1;
+                            break;
+                        }
+                        if (Fwrite((short)fh, n - i, buf + i) != n - i) {
+                            outs("Schrijven naar "); outs(outname); outs(" mislukt (vol?).\r\n");
+                            quit = 1;
+                            break;
+                        }
+                    }
                     if (discard) { body += n - i; break; }
                     show(c);
                     continue;
@@ -273,6 +310,8 @@ void tos_main(BASEPAGE *bp)
     }
     t_end = now();
     TCP_close(cn, 0, &closed);
+    if (fh >= 0) Fclose((short)fh);
+    if (save && !status_ok) { outs("Niets opgeslagen.\r\n"); goto done; }
     if (discard && !quit) {
         long ms = (t_end - t_first) * 5;
         outs("\r\n");
